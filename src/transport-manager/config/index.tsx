@@ -21,6 +21,8 @@ import { BinaryConnectionHandshake } from '@electricui/protocol-binary-connectio
 import { HintValidatorBinaryHandshake } from '@electricui/protocol-binary'
 import { MessageQueueBinaryFIFO } from '@electricui/protocol-binary-fifo-queue'
 import { SERIAL_TRANSPORT_KEY } from '@electricui/transport-node-serial'
+import { WEBSOCKETS_TRANSPORT_KEY } from '@electricui/transport-node-websocket'
+import { wsConsumer } from './websockets'
 
 /**
  * Create our device manager!
@@ -70,14 +72,19 @@ function hintValidators(
   connection: Connection,
   cancellationToken: CancellationToken,
 ) {
+  const identification = hint.getIdentification()
+
   // Serial
-  if (hint.getTransportKey() === SERIAL_TRANSPORT_KEY) {
+  if (
+    hint.getTransportKey() === SERIAL_TRANSPORT_KEY ||
+    hint.getTransportKey() === WEBSOCKETS_TRANSPORT_KEY
+  ) {
     const validator = new HintValidatorBinaryHandshake(
       hint,
       connection,
       cancellationToken,
       {
-        attemptTiming: [0, 10, 100, 1000, 2000, 5000],
+        attemptTiming: [0, 100, 1000, 2000, 5000],
       },
     ) // 2 second timeout
 
@@ -91,12 +98,16 @@ function createHandshakes(
   device: Device,
   cancellationToken: CancellationToken,
 ) {
+  const metadata = device.getMetadata()
+
   // Assume it's an eUI device, do the binary handshakes
   const connectionHandshakeReadWrite = new BinaryConnectionHandshake({
     device: device,
     preset: 'default',
     cancellationToken,
   })
+
+  // return []
 
   return [connectionHandshakeReadWrite]
 }
@@ -106,7 +117,7 @@ const processName = new ProcessName()
 
 deviceManager.setCreateHintValidatorsCallback(hintValidators)
 deviceManager.addHintProducers([serialProducer, usbProducer])
-deviceManager.addHintConsumers([serialConsumer])
+deviceManager.addHintConsumers([serialConsumer, wsConsumer])
 deviceManager.addHintTransformers([usbToSerialTransformer])
 deviceManager.addDeviceMetadataRequesters([requestName])
 deviceManager.addDiscoveryMetadataProcessors([processName])
@@ -116,10 +127,12 @@ deviceManager.setCreateHandshakesCallback(createHandshakes)
 
 // start polling immediately, poll for 10 seconds
 const cancellationToken = new CancellationToken('inital poll').deadline(10_000)
+
 deviceManager.poll(cancellationToken).catch(err => {
   if (cancellationToken.caused(err)) {
-    console.log("Didn't find any devices on initial poll")
+    return
   }
+  console.log('some other error happened when trying to poll', err)
 })
 
 const [dispose, refresh] = hotReloadDeviceManager(deviceManager)
@@ -128,3 +141,5 @@ if (module.hot) {
   module.hot.dispose(dispose)
   refresh(module.hot.data)
 }
+
+Error.stackTraceLimit = 100

@@ -12,25 +12,26 @@ import {
   DiscoveryHintConsumer,
   Hint,
   TransportFactory,
-  TypeCache,
 } from '@electricui/core'
 import {
+  SERIAL_TRANSPORT_KEY,
   SerialPortHintProducer,
   SerialPortUSBHintTransformer,
   SerialTransport,
   SerialTransportOptions,
+  SerialPortHintConfiguration,
+  SerialPortHintIdentification,
 } from '@electricui/transport-node-serial'
+import SerialPort, { OpenOptions, SetOptions } from 'serialport'
 
 import { BinaryLargePacketHandlerPipeline } from '@electricui/protocol-binary-large-packet-handler'
 import { COBSPipeline } from '@electricui/protocol-binary-cobs'
 import { HeartbeatConnectionMetadataReporter } from '@electricui/protocol-binary-heartbeats'
-import SerialPort from 'serialport'
 import USB from '@electricui/node-usb'
 import { USBHintProducer } from '@electricui/transport-node-usb-discovery'
 import { customCodecs } from './codecs'
 import { defaultCodecList } from '@electricui/protocol-binary-codecs'
-
-const typeCache = new TypeCache()
+import { typeCache } from './typeCache'
 
 const serialProducer = new SerialPortHintProducer({
   SerialPort,
@@ -50,7 +51,7 @@ const serialTransportFactory = new TransportFactory(
 
     const deliverabilityManager = new DeliverabilityManagerBinaryProtocol({
       connectionInterface,
-      timeout: 1000,
+      timeout: 3000,
     })
 
     const queryManager = new QueryManagerBinaryProtocol({
@@ -65,10 +66,10 @@ const serialTransportFactory = new TransportFactory(
     // `name` is added because it is requested by the metadata requester before handshake.
     const undefinedMessageIDGuard = new UndefinedMessageIDGuardPipeline(
       typeCache,
-      ['name'],
+      ['name', 'ws'],
     )
 
-    const codecPipeline = new CodecDuplexPipeline()
+    const codecPipeline = new CodecDuplexPipeline({ errorIfNoMatch: true })
     // Add the default codecs first so that queries are dealt with preferentially
     codecPipeline.addCodecs(defaultCodecList)
     // Add custom codecs after the default ones.
@@ -87,6 +88,7 @@ const serialTransportFactory = new TransportFactory(
     const heartbeatMetadata = new HeartbeatConnectionMetadataReporter({
       interval: 500,
       timeout: 1000,
+      startupSequence: [0, 2000, 2500, 3000, 4000, 5000],
       // measurePipeline: true,
     })
 
@@ -112,33 +114,33 @@ const serialTransportFactory = new TransportFactory(
 
 const serialConsumer = new DiscoveryHintConsumer({
   factory: serialTransportFactory,
-  canConsume: (hint: Hint) => {
-    if (hint.getTransportKey() === 'serial') {
+  canConsume: (
+    hint: Hint<SerialPortHintIdentification, SerialPortHintConfiguration>,
+  ) => {
+    if (hint.getTransportKey() === SERIAL_TRANSPORT_KEY) {
       // If you wanted to filter for specific serial devices, you would modify this section, removing the
       // return statement below and uncommenting the block below it, modifying it to your needs.
-
       const identification = hint.getIdentification()
 
-      // Filter out any /dev/ttyS____ comPaths since they're almost certainly terminals
-      if (identification.comPath.startsWith('/dev/ttyS')) {
+      // Don't use the bluetooth device on MacOS
+      if (identification.comPath.includes('Bluetooth')) {
         return false
       }
 
-      // An example of filtering devices with Arduino or Silicon in the manufacturers
-      /*
-      return (
-        identification.manufacturer && (
-          identification.manufacturer.includes('Arduino') ||
-          identification.manufacturer.includes('Silicon'))
-      )
-      */
-
-      // Try any device that isn't filtered out by this stage
       return true
+
+      // return (
+      //   identification.comPath.includes('serial') ||
+      //   (identification.manufacturer &&
+      //     (identification.manufacturer.includes('Arduino') ||
+      //       identification.manufacturer.includes('Silicon')))
+      // )
     }
     return false
   },
-  configure: (hint: Hint) => {
+  configure: (
+    hint: Hint<SerialPortHintIdentification, SerialPortHintConfiguration>,
+  ) => {
     const identification = hint.getIdentification()
     const configuration = hint.getConfiguration()
 
@@ -146,10 +148,8 @@ const serialConsumer = new DiscoveryHintConsumer({
       SerialPort,
       comPath: identification.comPath,
       baudRate: configuration.baudRate,
-      // if you have an Arduino that resets on connection, uncomment this line to delay the connection
-      // attachmentDelay: 2500,
+      // attachmentDelay: 2000, // if you have an arduino that resets on connection, set this to 2000.
     }
-
     return options
   },
 })
