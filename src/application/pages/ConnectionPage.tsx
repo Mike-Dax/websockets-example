@@ -95,6 +95,19 @@ export const ConnectionPage = (props: RouteComponentProps) => {
       <div style={{ height: '100vh' }}>
         <Logo />
 
+        <div
+          style={{
+            margin: '0 auto',
+            maxWidth: 450,
+            position: 'relative',
+            paddingTop: '10vh',
+          }}
+        >
+          <Card>
+            <WebsocketForm />
+          </Card>
+        </div>
+
         <Connections
           preConnect={deviceID => navigate(`/device_loading/${deviceID}`)}
           postHandshake={deviceID =>
